@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/spf13/pflag"
@@ -50,6 +51,8 @@ func withDBName(db string) serverOption {
 			db = defaultDbName
 		}
 		conf.dbName = db
+
+		fmt.Println("meow", conf)
 		return nil
 	}
 }

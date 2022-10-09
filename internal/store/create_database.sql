@@ -1,7 +1,5 @@
 /* creates a new, empty database */
 
-CREATE EXTENSION semver;
-
 CREATE TABLE module (
     id              SERIAL,
     name            TEXT NOT NULL,
@@ -15,20 +13,26 @@ CREATE TABLE module (
 CREATE TABLE module_version (
     id          SERIAL,
     module_id   INTEGER NOT NULL,
-    version     SEMVER NOT NULL,
+    major       INTEGER NOT NULL,
+    minor       INTEGER NOT NULL,
+    patch       INTEGER NOT NULL,
+    label       TEXT,
     CONSTRAINT pk_module_version
         PRIMARY KEY(id),
-    CONSTRAINT uc_module_version_module_id_version
-        UNIQUE (module_id, version),
     CONSTRAINT fk_module_version_module_id_module_id
         FOREIGN KEY(module_id) REFERENCES module (id)
         ON UPDATE NO ACTION
         ON DELETE CASCADE
 );
 
+CREATE UNIQUE INDEX uc_module_version_module_id_version
+		ON module_version
+        (module_id, major, minor, patch)
+  		WHERE label IS NULL;
+
 CREATE INDEX idx_module_version_version
     ON module_version USING btree
-    (module_id ASC NULLS LAST, version DESC NULLS FIRST);
+    (module_id ASC NULLS LAST, major, minor, patch, label DESC NULLS FIRST);
 
 CREATE TABLE module_dependency (
     dependent_id    INTEGER NOT NULL,

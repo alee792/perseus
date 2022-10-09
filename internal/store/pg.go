@@ -25,6 +25,8 @@ var (
 	//columnsModuleVersions = []string{"id", "module_id", "version"}
 	//colummsModuleDependencies = []string{"dependent_id", "dependee_id"}
 
+	orderBySemVerDesc = []string{"major DESC", "minor DESC", "patch DESC", "label DESC"}
+
 	psql = sq.StatementBuilder.PlaceholderFormat(sq.Dollar)
 )
 
@@ -223,7 +225,7 @@ func (p *PostgresClient) QueryModuleVersions(ctx context.Context, module string,
 		From(tableModuleVersions + " mv").
 		Join(tableModules + " m ON (m.id = mv.module_id)").
 		Where(sq.Eq{"m.name": module}).
-		OrderBy("mv.version DESC")
+		OrderBy(orderBySemVerDesc...)
 	if offset > 0 {
 		q = q.Offset(uint64(offset))
 	}
