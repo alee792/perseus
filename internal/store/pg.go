@@ -22,7 +22,7 @@ const (
 
 var (
 	columnsModules = []string{"id", "name", "description"}
-	//columnsModuleVersions = []string{"id", "module_id", "version"}
+	//columnsModuleVersions = []string{"id", "module_id", "major", "minor", "patch", "label"}
 	//colummsModuleDependencies = []string{"dependent_id", "dependee_id"}
 
 	orderBySemVerDesc = []string{"major DESC", "minor DESC", "patch DESC", "label DESC"}
@@ -93,7 +93,16 @@ func (p *PostgresClient) SaveModule(ctx context.Context, name, description strin
 		return err
 	}
 
-	if err = writeModuleVersions(ctx, txn, moduleID, versions...); err != nil {
+	semVers := []SemVer{}
+	for _, v := range versions {
+		sv, err := ParseSemVer(v)
+		if err != nil {
+			return err
+		}
+		semVers = append(semVers, sv)
+	}
+
+	if err = writeModuleVersions(ctx, txn, moduleID, semVers...); err != nil {
 		return err
 	}
 	return nil
@@ -101,7 +110,7 @@ func (p *PostgresClient) SaveModule(ctx context.Context, name, description strin
 
 // SaveModuleDependencies writes the specified set of direct dependencies of mod to the database.
 func (p *PostgresClient) SaveModuleDependencies(ctx context.Context, mod Version, deps ...Version) (err error) {
-	if mod.ModuleID == "" || mod.SemVer == "" {
+	if mod.ModuleID == "" || mod.Version == "" {
 		return fmt.Errorf("invalid module, both the module name and version must be specified")
 	}
 	if len(deps) == 0 {
@@ -120,14 +129,19 @@ func (p *PostgresClient) SaveModuleDependencies(ctx context.Context, mod Version
 		}
 	}()
 
+	sv, err := ParseSemVer(mod.Version)
+	if err != nil {
+		return err
+	}
+
 	pkey, err := writeModule(ctx, txn, mod.ModuleID, "")
 	if err != nil {
 		return err
 	}
-	if err = writeModuleVersions(ctx, txn, pkey, mod.SemVer); err != nil {
+	if err = writeModuleVersions(ctx, txn, pkey, sv); err != nil {
 		return err
 	}
-	dependentID, err := getModuleVersionID(ctx, txn, mod.ModuleID, mod.SemVer, p.log)
+	dependentID, err := getModuleVersionID(ctx, txn, mod.ModuleID, sv, p.log)
 	if err != nil {
 		return err
 	}
@@ -140,10 +154,16 @@ func (p *PostgresClient) SaveModuleDependencies(ctx context.Context, mod Version
 		if err != nil {
 			return err
 		}
-		if err = writeModuleVersions(ctx, txn, pkey, d.SemVer); err != nil {
+
+		sv, err := ParseSemVer(d.Version)
+		if err != nil {
 			return err
 		}
-		dependeeID, err := getModuleVersionID(ctx, txn, d.ModuleID, d.SemVer, p.log)
+
+		if err = writeModuleVersions(ctx, txn, pkey, sv); err != nil {
+			return err
+		}
+		dependeeID, err := getModuleVersionID(ctx, txn, d.ModuleID, sv, p.log)
 		if err != nil {
 			return err
 		}
@@ -221,7 +241,7 @@ func (p *PostgresClient) QueryModuleVersions(ctx context.Context, module string,
 		return nil, "", fmt.Errorf("the module name must be specified")
 	}
 	q := psql.
-		Select("mv.id", "mv.module_id", "mv.version AS version").
+		Select("mv.id", "mv.module_id", "mv.major", "mv.minor", "mv.patch", "mv.label").
 		From(tableModuleVersions + " mv").
 		Join(tableModules + " m ON (m.id = mv.module_id)").
 		Where(sq.Eq{"m.name": module}).
@@ -242,9 +262,19 @@ func (p *PostgresClient) QueryModuleVersions(ctx context.Context, module string,
 		return nil, "", err
 	}
 
-	err = p.db.SelectContext(ctx, &results, sql, args...)
+	rawVV := []struct {
+		Version
+		SemVer
+	}{}
+
+	err = p.db.SelectContext(ctx, &rawVV, sql, args...)
 	if err != nil {
 		return nil, "", err
+	}
+
+	for _, rawV := range rawVV {
+		rawV.Version.Version = rawV.SemVer.String()
+		results = append(results, rawV.Version)
 	}
 
 	return results, encodePageToken("moduleversions:"+module, len(results), offset, count), nil
@@ -264,13 +294,21 @@ func (p *PostgresClient) GetDependees(ctx context.Context, id, version string, p
 
 // getModuleVersionID executes a database query to translate the specified module and version to the
 // corresponding PKEY in the module_version table, creating the module and/or version if necessary
-func getModuleVersionID(ctx context.Context, db database, mod, ver string, log func(string, ...any)) (int32, error) {
+func getModuleVersionID(ctx context.Context, db database, mod string, ver SemVer, log func(string, ...any)) (int32, error) {
 	q := psql.
 		Select("mv.id").
 		From("module_version mv").
 		Join("module m ON (m.id = mv.module_id)").
-		Where(sq.Eq{"mv.version": ver}).
+		Where(sq.Eq{"mv.major": ver.Major}).
+		Where(sq.Eq{"mv.minor": ver.Minor}).
+		Where(sq.Eq{"mv.patch": ver.Patch}).
+		Where(sq.Eq{"mv.label": ver.Label}).
 		Where(sq.Eq{"m.name": mod})
+
+	if ver.Label != "" {
+		q = q.Where(sq.Eq{"mv.label": ver.Label})
+	}
+
 	sql, args, err := q.ToSql()
 	log("translate module name/version to ID: sql=%s args=%v err=%v\n", sql, args, err)
 	if err != nil {
@@ -374,12 +412,12 @@ func writeModule(ctx context.Context, db database, name, description string) (in
 }
 
 // writeModuleVersions upserts module versions into the database
-func writeModuleVersions(ctx context.Context, db database, moduleID int32, versions ...string) error {
+func writeModuleVersions(ctx context.Context, db database, moduleID int32, versions ...SemVer) error {
 	for i, ver := range versions {
 		cmd, args, err := psql.
 			Insert(tableModuleVersions).
-			Columns("module_id", "version").
-			Values(moduleID, strings.TrimPrefix(ver, "v")).
+			Columns("module_id", "major", "minor", "patch", "label").
+			Values(moduleID, ver.Major, ver.Minor, ver.Patch, ver.Label).
 			Suffix("ON CONFLICT ON CONSTRAINT uc_module_version_module_id_version DO NOTHING").
 			ToSql()
 		if err != nil {

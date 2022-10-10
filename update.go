@@ -26,7 +26,7 @@ func createUpdateCommand() *cobra.Command {
 	cmd := cobra.Command{
 		Use:          "update path/to/go/module",
 		Short:        "Processes a Go module and updates the Perseus graph with its direct dependencies",
-		Example:      "perseus update . --version 0.11.38\nperseus update $HOME/dev/go/foo --version 1.0.0\nperseus update $HOME/dev/go/bar",
+		Example:      "perseus update . --version v0.11.38\nperseus update $HOME/dev/go/foo --version v1.0.0\nperseus update $HOME/dev/go/bar",
 		RunE:         runUpdateCmd,
 		SilenceUsage: true,
 	}

@@ -127,7 +127,7 @@ func (s *grpcServer) ListModuleVersions(ctx context.Context, req *perseusapi.Lis
 		NextPageToken: pageToken,
 	}
 	for _, v := range vers {
-		resp.Versions = append(resp.Versions, "v"+v.SemVer)
+		resp.Versions = append(resp.Versions, "v"+v.Version)
 		if req.GetVersionOption() == perseusapi.ModuleVersionOption_latest {
 			break
 		}
@@ -165,7 +165,7 @@ func (s *grpcServer) QueryDependencies(ctx context.Context, req *perseusapi.Quer
 	for _, d := range deps {
 		resp.Modules = append(resp.Modules, &perseusapi.Module{
 			Name:     d.ModuleID,
-			Versions: []string{"v" + d.SemVer},
+			Versions: []string{"v" + d.Version},
 		})
 	}
 	return &resp, nil
@@ -181,7 +181,7 @@ func (s *grpcServer) UpdateDependencies(ctx context.Context, req *perseusapi.Upd
 	}
 	mod := store.Version{
 		ModuleID: modName,
-		SemVer:   strings.TrimPrefix(modVer, "v"),
+		Version:  strings.TrimPrefix(modVer, "v"),
 	}
 	deps := make([]store.Version, len(req.GetDependencies()))
 	for i, dep := range req.GetDependencies() {
@@ -194,7 +194,7 @@ func (s *grpcServer) UpdateDependencies(ctx context.Context, req *perseusapi.Upd
 
 		deps[i] = store.Version{
 			ModuleID: depName,
-			SemVer:   strings.TrimPrefix(depVers[0], "v"),
+			Version:  strings.TrimPrefix(depVers[0], "v"),
 		}
 	}
 
